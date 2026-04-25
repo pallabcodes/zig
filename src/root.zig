@@ -21,6 +21,12 @@ pub const ffi = @import("ffi/c_interop.zig");
 /// Concurrency and Atomic primitives.
 pub const atomics = @import("concurrency/atomics.zig");
 
+/// Thread Pools and Backpressure.
+pub const thread_pool = @import("parallelism/thread_pool.zig");
+
+/// Pausable Streams and Generators.
+pub const streams = @import("parallelism/streams.zig");
+
 /// Low-level systems primitives: Packed structs and Tagged unions.
 pub const systems = @import("systems/packed.zig");
 
@@ -43,6 +49,8 @@ test {
     _ = reflection;
     _ = ffi;
     _ = atomics;
+    _ = thread_pool;
+    _ = streams;
     _ = systems;
     _ = performance;
     _ = fuzz;

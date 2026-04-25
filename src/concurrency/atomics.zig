@@ -1,42 +1,65 @@
 const std = @import("std");
 const Atomic = std.atomic.Value;
 
-/// L7 Insight: Lock-Free Programming and Memory Ordering
-/// 
-/// In C++11, `std::atomic` is powerful but can be opaque.
-/// Zig's `std.atomic.Value` provides a clean interface to hardware primitives.
-/// For systems engineers, the "ordering" parameter is the most critical part.
-pub fn demonstrateAtomics() !void {
-    std.debug.print("\n--- Concurrency & Atomics ---\n", .{});
+/// L7 Insight: Lock-Free SPSC Queue
+/// A wait-free ring buffer demonstrating proper memory ordering.
+/// .release is used when publishing data to ensure preceding writes are visible.
+/// .acquire is used when consuming to ensure subsequent reads see the published data.
+pub fn SpscQueue(comptime T: type, comptime capacity: usize) type {
+    return struct {
+        buffer: [capacity]T = undefined,
+        head: Atomic(usize) = Atomic(usize).init(0),
+        tail: Atomic(usize) = Atomic(usize).init(0),
 
-    // We use a simple counter shared between "threads" (simulated or real).
-    var counter = Atomic(u32).init(0);
+        const Self = @This();
 
-    // 1. Monotonic increment (Fetch-Add)
-    // .monotonic is enough if we only care about the final value and not ordering
-    // relative to other memory operations.
-    _ = counter.fetchAdd(1, .monotonic);
-    _ = counter.fetchAdd(1, .monotonic);
+        pub fn push(self: *Self, value: T) bool {
+            const current_tail = self.tail.load(.monotonic);
+            const next_tail = (current_tail + 1) % capacity;
+            
+            if (next_tail == self.head.load(.acquire)) {
+                return false; // Queue full
+            }
+            
+            self.buffer[current_tail] = value;
+            self.tail.store(next_tail, .release); // Publish
+            return true;
+        }
 
-    std.debug.print("Atomic counter value: {d}\n", .{counter.load(.monotonic)});
-
-    // 2. Compare and Swap (CAS)
-    // The building block of lock-free data structures.
-    const expected = 2;
-    const new_value = 100;
-    
-    // tryCompareAndSwap returns the old value if it fails.
-    if (counter.cmpxchgStrong(expected, new_value, .seq_cst, .seq_cst)) |_| {
-        std.debug.print("CAS failed: value was not {d}\n", .{expected});
-    } else {
-        std.debug.print("CAS succeeded: value is now {d}\n", .{counter.load(.seq_cst)});
-    }
-
-    std.debug.print("L7 Note: Use .seq_cst (Sequentially Consistent) for safety, but .acquire/.release for performance.\n", .{});
+        pub fn pop(self: *Self) ?T {
+            const current_head = self.head.load(.monotonic);
+            
+            if (current_head == self.tail.load(.acquire)) {
+                return null; // Queue empty
+            }
+            
+            const value = self.buffer[current_head];
+            self.head.store((current_head + 1) % capacity, .release);
+            return value;
+        }
+    };
 }
 
-test "atomic basic" {
-    var val = Atomic(i32).init(0);
-    _ = val.fetchAdd(5, .monotonic);
-    try std.testing.expectEqual(@as(i32, 5), val.load(.monotonic));
+pub fn demonstrateAtomics() !void {
+    std.debug.print("\n--- Concurrency: Lock-Free SPSC Queue ---\n", .{});
+    
+    var queue = SpscQueue(u32, 4){};
+    
+    _ = queue.push(100);
+    _ = queue.push(200);
+    
+    std.debug.print("Popped: {?d}\n", .{queue.pop()});
+    std.debug.print("Popped: {?d}\n", .{queue.pop()});
+    std.debug.print("Popped (empty): {?d}\n", .{queue.pop()});
+}
+
+test "spsc queue" {
+    var q = SpscQueue(u32, 3){};
+    try std.testing.expect(q.push(1));
+    try std.testing.expect(q.push(2));
+    try std.testing.expect(!q.push(3)); // Full, capacity is 3, holds max 2
+    
+    try std.testing.expectEqual(@as(?u32, 1), q.pop());
+    try std.testing.expectEqual(@as(?u32, 2), q.pop());
+    try std.testing.expectEqual(@as(?u32, null), q.pop());
 }

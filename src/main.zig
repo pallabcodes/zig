@@ -18,6 +18,8 @@ pub fn main() !void {
 
     // Phase 5: Systems Primitives
     try lib.atomics.demonstrateAtomics();
+    try lib.thread_pool.demonstrateThreadPool();
+    lib.streams.demonstrateStreams();
     lib.systems.demonstratePacked();
 
     // Phase 6: High Performance (Google-scale)

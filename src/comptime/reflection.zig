@@ -1,41 +1,57 @@
 const std = @import("std");
 
-pub fn printStructFields(comptime T: type, value: T) void {
+/// L7 Insight: Zero-Cost Comptime Serializer
+/// Uses @typeInfo to generate highly optimized, unrolled byte-parsing logic 
+/// at compile-time for arbitrary structs, avoiding runtime reflection overhead.
+pub fn serialize(comptime T: type, value: T, writer: anytype) !void {
     const info = @typeInfo(T);
-
     switch (info) {
         .@"struct" => |s| {
-            std.debug.print("Introspecting struct '{s}':\n", .{@typeName(T)});
-
             inline for (s.fields) |field| {
-                const val = @field(value, field.name);
-                std.debug.print("  - Field: {s}, Type: {s}, Value: {any}\n", .{
-                    field.name,
-                    @typeName(field.type),
-                    val,
-                });
+                try serialize(field.type, @field(value, field.name), writer);
             }
         },
-        else => {
-            @compileError("printStructFields only works on structs, found " ++ @tagName(info));
+        .int => {
+            try writer.writeInt(T, value, .little);
         },
+        .bool => {
+            const b: u8 = if (value) 1 else 0;
+            try writer.writeInt(u8, b, .little);
+        },
+        else => @compileError("Unsupported type for serialization: " ++ @typeName(T)),
     }
 }
 
 pub fn demonstrateReflection() void {
-    std.debug.print("\n--- Comptime Reflection ---\n", .{});
+    std.debug.print("\n--- Comptime: Zero-Cost Serializer ---\n", .{});
 
-    const User = struct {
-        id: u32,
-        name: []const u8,
-        active: bool,
+    const NetworkHeader = struct {
+        magic: u32,
+        version: u16,
+        is_encrypted: bool,
     };
 
-    const me = User{
-        .id = 1,
-        .name = "L7 Engineer",
-        .active = true,
+    const header = NetworkHeader{
+        .magic = 0xDEADBEEF,
+        .version = 2,
+        .is_encrypted = true,
     };
 
-    printStructFields(User, me);
+    var buf: [32]u8 = undefined;
+    var fba = std.io.fixedBufferStream(&buf);
+    
+    serialize(NetworkHeader, header, fba.writer()) catch unreachable;
+    
+    std.debug.print("Serialized output: {x}\n", .{fba.getWritten()});
+}
+
+test "comptime serializer" {
+    const Point = struct { x: u32, y: u32 };
+    const pt = Point{ .x = 10, .y = 20 };
+    
+    var buf: [8]u8 = undefined;
+    var fba = std.io.fixedBufferStream(&buf);
+    try serialize(Point, pt, fba.writer());
+    
+    try std.testing.expectEqualSlices(u8, &[_]u8{ 10, 0, 0, 0, 20, 0, 0, 0 }, fba.getWritten());
 }
